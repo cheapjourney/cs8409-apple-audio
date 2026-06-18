@@ -123,3 +123,19 @@ Based on the reverse-engineering work by [David Jo](https://github.com/davidjo/s
 ## License
 
 GPL-2.0 (inherited from the Linux kernel sound subsystem)
+
+## DKMS Installation
+
+This installs the CS8409 Apple audio driver as a DKMS module so it is rebuilt automatically after kernel updates.
+
+```bash
+sudo apt install -y dkms build-essential linux-headers-$(uname -r)
+
+sudo mkdir -p /usr/src/cs8409-apple-audio-1.0
+sudo rsync -a --delete --exclude='.git' ./ /usr/src/cs8409-apple-audio-1.0/
+
+sudo dkms add -m cs8409-apple-audio -v 1.0
+sudo dkms build -m cs8409-apple-audio -v 1.0 -k "$(uname -r)"
+sudo dkms install -m cs8409-apple-audio -v 1.0 -k "$(uname -r)"
+
+sudo reboot
