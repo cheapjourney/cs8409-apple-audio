@@ -1,5 +1,13 @@
 # Cirrus CS8409 Audio Driver for Apple Macs
 
+> [!IMPORTANT]
+> **Tested Ubuntu kernel versions**
+>
+> - **7.0.0-27-generic** — supported with the original HDA structure layout
+> - **7.0.0-28-generic** — supported with the Ubuntu ABI 28 compatibility fix
+>
+> Hardware tested: **Apple iMac18,3 with Cirrus Logic CS8409**
+
 Kernel driver that enables **built-in speakers, headphone jack, and internal microphone** on Apple Intel Macs with **Cirrus Logic CS8409** HDA audio chips running Linux.
 
 | 🍎 Hardware | Status |
@@ -116,15 +124,16 @@ sudo reboot
 - Build flags: `-DAPPLE_PINSENSE_FIXUP -DAPPLE_CODECS -DCONFIG_SND_HDA_RECONFIG=1`
 - The module installs to `/lib/modules/<kernel>/updates/` which takes precedence over the stock module at `/lib/modules/<kernel>/kernel/sound/pci/hda/`
 
-## Ubuntu kernel ABI compatibility
+## Kernel compatibility
 
-Ubuntu 7.0.0-28 introduced an additional `share_spdif_kctl` pointer in
-`struct hda_multi_out`. Since this driver carries local copies of internal
-HDA structures, the layout must match the target kernel.
+| Kernel | Status | Required layout |
+|---|---|---|
+| **Ubuntu 7.0.0-27-generic** | ✅ Tested and working | Original `struct hda_multi_out` layout |
+| **Ubuntu 7.0.0-28-generic** | ✅ Tested and working | Includes `share_spdif_kctl` compatibility |
+| **Ubuntu ABI 28 and newer** | ⚠️ Compatibility code included, not every kernel individually tested | `share_spdif_kctl` enabled |
+| **Upstream Linux 7.1 and newer** | ⚠️ Compatibility code included, not every kernel individually tested | `share_spdif_kctl` enabled |
 
-The field is conditionally enabled for Ubuntu ABI 28 and newer and for
-upstream Linux 7.1 and newer. Ubuntu 7.0.0-27 remains supported with the
-previous layout.
+The driver was physically tested on an **iMac18,3**. Internal speakers, headphone output and microphone detection work with Ubuntu kernels **7.0.0-27-generic** and **7.0.0-28-generic**.
 
 ## Credits
 
