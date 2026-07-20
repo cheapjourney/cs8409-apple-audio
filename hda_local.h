@@ -10,6 +10,9 @@
 #ifndef __SOUND_HDA_LOCAL_H
 #define __SOUND_HDA_LOCAL_H
 
+#include <linux/version.h>
+#include <generated/utsrelease.h>
+
 /* We abuse kcontrol_new.subdev field to pass the NID corresponding to
  * the given new control.  If id.subdev has a bit flag HDA_SUBDEV_NID_FLAG,
  * snd_hda_ctl_add() takes the lower-bit subdev value as a valid NID.
@@ -219,6 +222,10 @@ struct hda_multi_out {
 	unsigned int spdif_rates;
 	unsigned int spdif_maxbps;
 	u64 spdif_formats;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(7, 1, 0)) || \
+    (defined(UTS_UBUNTU_RELEASE_ABI) && UTS_UBUNTU_RELEASE_ABI >= 28)
+	struct snd_kcontrol *share_spdif_kctl; /* cached shared SPDIF switch */
+#endif
 };
 
 int snd_hda_create_spdif_share_sw(struct hda_codec *codec,

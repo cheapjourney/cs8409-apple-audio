@@ -116,6 +116,16 @@ sudo reboot
 - Build flags: `-DAPPLE_PINSENSE_FIXUP -DAPPLE_CODECS -DCONFIG_SND_HDA_RECONFIG=1`
 - The module installs to `/lib/modules/<kernel>/updates/` which takes precedence over the stock module at `/lib/modules/<kernel>/kernel/sound/pci/hda/`
 
+## Ubuntu kernel ABI compatibility
+
+Ubuntu 7.0.0-28 introduced an additional `share_spdif_kctl` pointer in
+`struct hda_multi_out`. Since this driver carries local copies of internal
+HDA structures, the layout must match the target kernel.
+
+The field is conditionally enabled for Ubuntu ABI 28 and newer and for
+upstream Linux 7.1 and newer. Ubuntu 7.0.0-27 remains supported with the
+previous layout.
+
 ## Credits
 
 Based on the reverse-engineering work by [David Jo](https://github.com/davidjo/snd_hda_macbookpro) and the standalone build by [egorenar](https://github.com/egorenar/snd-hda-codec-cs8409).
