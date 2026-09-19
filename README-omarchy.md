@@ -189,6 +189,60 @@ Faustregel: Spitze unter etwa -6 dBFS.
 Pull Request
 [#197](https://github.com/davidjo/snd_hda_macbookpro/pull/197).
 
+## Pegel kalibrieren (Wiedergabe und Aufnahme)
+
+Auf Omarchy steuert **WirePlumber** beide Richtungen und bildet die Lautstärke auf
+die Hardware-Regler ab. Gemessen (Kernel 7.2.5-3) mit einem Tonträger von 1 kHz /
+-18 dBFS, aufgenommen über das interne Mikrofon:
+
+Wiedergabe — Sink-Lautstärke → ALSA-Regler → gemessener Schallpegel:
+
+| Sink (`wpctl`)  | ALSA `PCM`      | Mikrofon RMS | Mikrofon Spitze |
+|-----------------|-----------------|--------------|-----------------|
+| 0,4             | 53 % / -23,8 dB | -33,2 dBFS   | -28,4 dBFS      |
+| 0,6             | 74 % / -13,2 dB | -22,6 dBFS   | -18,5 dBFS      |
+| 0,8             | 89 % /  -5,8 dB | -15,2 dBFS   | -11,9 dBFS      |
+| 1,0             | 100 % /   0,0 dB |  -9,6 dBFS   |  -6,4 dBFS      |
+
+**1,0 ist der richtige Ruhewert**, denn dann greift keine Absenkung. Stand der Sink
+auf 0,4, fehlen gegenüber Vollaussteuerung 23,8 dB — das klingt „leise", ist aber
+kein Treiberproblem, sondern eine Einstellung.
+
+Aufnahme — Quelle auf 0,3:
+
+| Größe                  | Wert            |
+|------------------------|-----------------|
+| `Internal Mic Capture` | 81 % / 0,00 dB  |
+| `Internal Mic Boost`   | 0 / 0,00 dB     |
+
+Das ist die Einstellung **ohne Zusatzverstärkung**. Beide Werte bleiben erhalten:
+nach `systemctl --user restart wireplumber` kamen Sink 1,00 und Quelle 0,30
+unverändert zurück.
+
+### Gleichzeitige Wiedergabe und Aufnahme
+
+Geprüft, weil es für Anrufe entscheidend ist: **funktioniert.**
+
+| Versuch                                        | Ergebnis                  |
+|------------------------------------------------|---------------------------|
+| Aufnahme allein über PipeWire                  | 131.116 Byte              |
+| Aufnahme **während** Wiedergabe über PipeWire  | 196.652 Byte              |
+| Aufnahme während Wiedergabe direkt `hw:0,0`    | `Device or resource busy` |
+| Zustand beider Ströme danach                   | `pcm0p`/`pcm0c` RUNNING   |
+
+Das „busy" ist kein Defekt: PipeWire hält das Gerät. Direktzugriff klappt nur,
+wenn die Nutzerdienste vorher gestoppt sind.
+
+### ⚠ Eine zu kurze Aufnahme sieht aus wie der alte Treiberfehler
+
+`parecord` braucht rund eine Sekunde, bis der Strom wirklich Daten liefert. Wird
+das Messfenster zu kurz gewählt (`timeout 1.5`), entsteht eine **44-Byte-Datei** —
+genau das Bild, das weiter oben den defekten Aufnahmepfad kennzeichnete.
+Nachgemessen: mit 1,5 s kam nichts, mit 3 s kamen 131 KB. **Vor dem Urteil
+„Treiber kaputt" also immer mit mindestens 3 Sekunden messen.** Zu unterscheiden
+ist das am direkten Hardware-Zugriff: `arecord -D hw:0,0` liefert bei intaktem
+Treiber Daten, während PipeWire noch gar nichts schreibt.
+
 ## Die Struktur-Layouts prüfen (`tools/check-abi.py`)
 
 Das ist der wichtigste Punkt für die Zukunft.
