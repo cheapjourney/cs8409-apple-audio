@@ -1734,6 +1734,10 @@ void cs_8409_apple_free(struct hda_codec *codec)
 //      this includes enabling/disabling whether we see a Headphone entry in the settings sound dialog
 
 
+static int cs_8409_apple_create_input_ctls_old(struct hda_codec *codec);
+
+/* Neu fuer Kernel >= 5.13: korrigiert die ADC-Liste.
+ * Begruendung siehe Kommentar an der Aufrufstelle in cs_8409_apple_parse_auto_config. */
 static int cs_8409_apple_create_input_ctls(struct hda_codec *codec);
 
 static void cs_8409_cs42l83_callback(struct hda_codec *codec, struct hda_jack_callback *event);
@@ -1797,13 +1801,20 @@ static int cs_8409_apple_parse_auto_config(struct hda_codec *codec)
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0)
 	// new routine to setup inputs - based on the hda_generic code
-	cs_8409_apple_create_input_ctls(codec);
+	cs_8409_apple_create_input_ctls_old(codec);
 #else
 	// as of 5.13 the definition of AUTO_CFG_MAX_INS has been increased to handle the 8409
 	// so the above may not be needed
 	// (without the above no input pins were recognised at all)
 	// need to check if fixed other input definitions in cs_8409_apple_create_input_ctls
 	// and redo the updated input definitions here
+	//
+	// Uebernommen aus davidjo/snd_hda_macbookpro, patch_cirrus/cirrus_apple.h:
+	// check_dyn_adc_switch in hda_generic.c verkleinert die adc_nids-Liste nicht
+	// korrekt -- der 8409 hat einen zufaelligen Non-Null-Eintrag in einer sonst
+	// leeren Liste. Ohne diese Korrektur bleibt der Aufnahmestrom auf einen
+	// falschen ADC gesetzt und die Aufnahme scheitert mit E/A-Fehler.
+	cs_8409_apple_create_input_ctls(codec);
 #endif
 
 
@@ -1948,8 +1959,9 @@ static int cs_8409_parse_capture_source(struct hda_codec *codec, hda_nid_t pin,
 #define CFG_IDX_MIX	99	/* a dummy cfg->input idx for stereo mix */
 
 // copied from create_input_ctls in hda_generic.c
+// (nur fuer Kernel < 5.13 kompiliert, siehe deren Aufrufstelle)
 
-static int cs_8409_apple_create_input_ctls(struct hda_codec *codec)
+static int cs_8409_apple_create_input_ctls_old(struct hda_codec *codec)
 {
 	struct hda_gen_spec *spec = codec->spec;
 	const struct auto_pin_cfg *cfg = &spec->autocfg;
@@ -2084,6 +2096,71 @@ static int cs_8409_apple_create_input_ctls(struct hda_codec *codec)
 }
 
 #endif
+
+
+/* Korrigiert die ADC-Liste fuer Kernel >= 5.13.
+ *
+ * Uebernommen aus davidjo/snd_hda_macbookpro (patch_cirrus/cirrus_apple.h).
+ *
+ * check_dyn_adc_switch in hda_generic.c soll die adc_nids-Liste auf die
+ * tatsaechlich verbundenen ADCs reduzieren, tut das aber nicht: es nimmt an,
+ * die Liste sei eine Null-terminierte Folge. Beim 8409 steht jedoch ein
+ * zufaelliger Non-Null-Eintrag in einer ansonsten leeren Liste. Bleibt das
+ * unkorrigiert, wird der Aufnahmestrom auf einen nicht vorhandenen ADC
+ * gesetzt und die Aufnahme scheitert mit E/A-Fehler.
+ */
+static int cs_8409_apple_create_input_ctls(struct hda_codec *codec)
+{
+	struct hda_gen_spec *spec = codec->spec;
+	struct hda_input_mux *imux = &spec->input_mux;
+	int i, n, nums;
+
+	myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls\n");
+
+	/* fuer wie viele Eingangseintraege gibt es ueberhaupt einen ADC? */
+	nums = 0;
+	for (i = 0; i < imux->num_items; i++)
+		for (n = 0; n < spec->num_adc_nids; n++)
+			if (spec->input_paths[i][n])
+				nums++;
+
+	if (nums != spec->num_adc_nids) {
+		/* ungueltige ADCs und Eingangspfade zusammenziehen */
+		printk("snd_hda_intel: hda_generic_check_dyn_adc_switch shrinking\n");
+		nums = 0;
+		for (i = 0; i < imux->num_items; i++) {
+			for (n = 0; n < spec->num_adc_nids; n++) {
+				struct nid_path *path;
+
+				if (!spec->input_paths[i][n])
+					continue;
+
+				spec->adc_nids[nums] = spec->adc_nids[n];
+
+				/* entspricht invalidate_nid_path() aus hda_generic.c */
+				path = snd_hda_get_path_from_idx(codec,
+						spec->input_paths[i][nums]);
+				if (path)
+					memset(path, 0, sizeof(*path));
+
+				spec->input_paths[i][nums] = spec->input_paths[i][n];
+				spec->input_paths[i][n] = 0;
+				nums++;
+				/* nur den ersten Nicht-Null-Pfad je ADC behalten */
+				break;
+			}
+		}
+		spec->num_adc_nids = nums;
+	}
+
+	for (n = 0; n < spec->num_adc_nids; n++)
+		myprintk("snd_hda_intel: cs_8409_apple_create_input_ctls adc nid 0x%02x\n",
+			 spec->adc_nids[n]);
+
+	myprintk("snd_hda_intel: end cs_8409_apple_create_input_ctls\n");
+
+	return 0;
+}
 
 /* do I need this for 8409 - I certainly need some gpio patching */
 static void cs_8409_apple_fixup_gpio(struct hda_codec *codec,
@@ -2603,7 +2680,9 @@ static int patch_cs8409_apple(struct hda_codec *codec)
 	spec->gen.suppress_vmaster = 1;
 
         // we probably also want to suppress auto mic
-	//spec->gen.suppress_auto_mic = 1;
+        // (aktiviert wie in davidjo/snd_hda_macbookpro -- sonst greift die
+        //  Mikrofon-Automatik in den Aufnahmepfad ein)
+	spec->gen.suppress_auto_mic = 1;
 
 	// dell GPIO pins are : /* GPIO 5 out, 3,4 in */
 	// what is true is the cs8409 interrupt GPIO is pin 1
