@@ -27,11 +27,12 @@ GRN=$'\033[0;32m'; YEL=$'\033[1;33m'; RED=$'\033[0;31m'; NC=$'\033[0m'
 MOD="snd-hda-codec-cs8409"
 MODU="snd_hda_codec_cs8409"
 KVER="$(uname -r)"
-UPD="/usr/lib/modules/${KVER}/updates/${MOD}.ko"
 pass=0; fail=0
 
 ja() { [[ "$1" == "$2" ]] && { echo "  OK    $3"; pass=$((pass+1)); } \
                           || { echo "  ${RED}FEHL${NC}  $3 (ist: $2)"; fail=$((fail+1)); }; }
+# Hinweis ohne Wirkung auf das Ergebnis (zaehlt weder als bestanden noch als Fehler)
+warn() { echo "  ${YEL}HINWEIS${NC} $*"; }
 
 echo
 echo "======================================================"
@@ -44,27 +45,22 @@ echo
 echo "1) Herkunft"
 RESOLVED="$(modinfo -n "$MOD" 2>/dev/null)"
 echo "   aufgelöst auf: ${RESOLVED:-nichts gefunden}"
-if [[ "$RESOLVED" == "$UPD" ]]; then
-    ja x x "Modul wird aus updates/ geladen (nicht aus dem Kernelbaum)"
-else
-    ja updates "$([[ "$RESOLVED" == *"updates"* ]] && echo updates || echo kernel)" \
-       "Modul wird aus updates/ geladen (nicht aus dem Kernelbaum)"
-fi
+# Der Pfad darf nicht fest verdrahtet werden: von Hand installiert liegt das
+# Modul unter updates/, per DKMS unter updates/dkms/ und dann zstd-komprimiert
+# als .ko.zst. Beides ist richtig.
+ja updates "$([[ "$RESOLVED" == *"/updates/"* ]] && echo updates || echo kernel)" \
+   "Modul kommt aus updates/, nicht aus dem Kernelbaum"
 
 # ------------------------------------------- 2. Liegt UNSER Modul im Speicher?
 echo
 echo "2) Ist der laufende Treiber wirklich unser Build?"
 LIVE_SRC="$(cat /sys/module/${MODU}/srcversion 2>/dev/null)"
-FILE_SRC="$(modinfo -F srcversion "$UPD" 2>/dev/null)"
+FILE_SRC="$(modinfo -F srcversion "$RESOLVED" 2>/dev/null)"
 echo "   im Speicher : ${LIVE_SRC:-nicht geladen}"
-echo "   in updates/ : ${FILE_SRC:-keine Datei}"
-if [[ -z "$LIVE_SRC" ]]; then
-    ja datei keine "Modul ist geladen"
-else
-    ja datei datei "Modul ist geladen"
-fi
+echo "   in der Datei: ${FILE_SRC:-keine Datei}"
+ja ja "$([[ -n "$LIVE_SRC" ]] && echo ja || echo nein)" "Modul ist geladen"
 ja file "$([[ -n "$LIVE_SRC" && "$LIVE_SRC" == "$FILE_SRC" ]] && echo file || echo anders)" \
-   "identisch mit dem Build in updates/ (nicht der Kernel-Treiber)"
+   "identisch mit der aufgelösten Moduldatei (nicht der Kernel-Treiber)"
 
 # --------------------------------------------- 3. Wurde der Apple-Pfad genommen?
 echo
@@ -135,10 +131,18 @@ if command -v parecord >/dev/null 2>&1; then
         python3 "$PEGEL_TOOL" /tmp/mikrofon-pruefung.wav | sed 's/^/   /'
         PEGEL="$(python3 "$PEGEL_TOOL" /tmp/mikrofon-pruefung.wav 2>/dev/null \
                  | awk '/RMS/{print $3}')"
+        SPITZE="$(python3 "$PEGEL_TOOL" /tmp/mikrofon-pruefung.wav 2>/dev/null \
+                 | awk '/Spitze/{print $3}')"
         if awk -v p="${PEGEL:--999}" 'BEGIN{exit !(p > -80)}'; then
             ja ja ja "Mikrofon liefert Signal (ueber -80 dBFS)"
         else
             ja ja nein "Mikrofon liefert Signal (ueber -80 dBFS)"
+        fi
+        # Hinweis, keine Pruefung: Wand-nahe Spitze heisst Vollaussteuerung.
+        if awk -v s="${SPITZE:--999}" 'BEGIN{exit !(s > -1.0)}'; then
+            warn "Spitze ${SPITZE} dBFS = Vollaussteuerung, die Aufnahme klirrt."
+            warn "Pegel ueber den Soundserver setzen:  wpctl status  ->  wpctl set-volume <id> 0.4"
+            warn "(amixer-Werte werden von WirePlumber wieder ueberschrieben)"
         fi
         rm -f /tmp/mikrofon-pruefung.wav
     else

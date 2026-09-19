@@ -152,9 +152,38 @@ Dazu kehrt der `Mic`-Regler in den Mixer zurück, und die Messung liefert Signal
 | vorher (max. Verstärkung)        | -17,0 dBFS | -0,0 dBFS | Signal, klirrt  |
 | nach Justierung, ruhiger Raum    | -37,7 dBFS | -22,9 dBFS | Signal, sauber  |
 
-⚠ Der Wert `-0,0 dBFS` ist Vollaussteuerung. Wer die Verstärkung zum Testen auf
-Maximum dreht (`Internal Mic 100%`, `Internal Mic Boost 2`), nimmt klirrend auf.
-Für Sprachaufnahmen haben sich `Internal Mic 60%` und `Boost 0` bewährt.
+⚠ **Den Aufnahmepegel nicht mit `amixer` einstellen.** Der Wert `-0,0 dBFS` ist
+Vollaussteuerung, also klirrende Aufnahme — und genau das ist der Zustand direkt
+nach der Installation: WirePlumber setzt beim ersten Initialisieren des Geräts den
+kompletten Aufnahmepfad auf Maximum (`Internal Mic Capture` 100 % / +12 dB **und**
+`Internal Mic Boost` 2 / +20 dB). Nachgemessen: nach `systemctl --user restart
+wireplumber` standen die Regler wieder auf Maximum — solange der Soundserver noch
+keinen eigenen Wert für das Gerät hat.
+
+`amixer`-Werte sind bei laufendem WirePlumber also nur ein **Abbild**, keine
+Einstellung. Der richtige Weg ist der Soundserver selbst:
+
+```bash
+wpctl status                # im Abschnitt Sources die ID der Analog-Quelle
+wpctl set-volume <id> 0.3
+```
+
+WirePlumber bildet das auf die Hardware ab und räumt dabei den Boost auf 0:
+
+| Zustand                          | Capture        | Boost      |
+|----------------------------------|----------------|------------|
+| ohne eigenen Wert (Vorgabe)      | 100 % / +12 dB | 2 / +20 dB |
+| nach `wpctl set-volume <id> 0.4` | 94 % / +8 dB   | 0 / 0 dB   |
+| nach `wpctl set-volume <id> 0.3` | 81 % / 0 dB    | 0 / 0 dB   |
+
+**Der Wert bleibt.** Nach einem erneuten Neustart des Dienstes kam er unverändert
+zurück (0,30), die Hardware blieb auf 81 % / 0 dB. Das Maximum ist also nur ein
+Erstzustand. Dasselbe bewirkt der Lautstärkeregler des Desktops.
+
+⚠ Kalibrieren lässt sich der Pegel nur in ruhiger Umgebung: ist es laut, erreicht
+die Spitze auch bei kleinerem Hardware-Pegel die Vollskala — das sagt dann nichts
+über Klirren aus (gemessen: Spitze -1,4 dBFS bei 94 %, aber -0,4 dBFS bei 81 %).
+Faustregel: Spitze unter etwa -6 dBFS.
 
 **Nicht behoben:** Aufnahme über ein Headset-Mikrofon. Dafür gibt es den offenen
 Pull Request
