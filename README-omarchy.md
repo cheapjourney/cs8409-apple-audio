@@ -91,6 +91,7 @@ niemand erneut benutzt:
 | 3 | Logmarke `NOT FOUND trying APPLE` vorhanden            | vorhanden                           |
 | 4 | PipeWire-Senke nennt `CS8409/CS42L83`                  | `CS8409/CS42L83 Analog`             |
 | 5 | PCM-Strom während eines Tons                           | `state RUNNING`, `hw_ptr` steigend  |
+| 6 | Pegel einer 4-s-Aufnahme vom internen Mikrofon         | RMS deutlich über -80 dBFS          |
 
 Kriterium 2 ist der scharfe Test: die `srcversion` wird aus dem Modulcode
 berechnet. Stimmen Speicher und Datei überein, läuft wirklich dieser Build und
@@ -102,7 +103,62 @@ liest zweimal `hw_ptr` aus `/proc/asound/card0/pcm0p/sub0/status`. Läuft der
 Wert weiter, erreichen die Daten die Hardware. Beim Bau dieses Dokuments
 gemessen: `78124 -> 122388` bei `state RUNNING`.
 
-Gesamtbild auf einem funktionierenden System: **8 bestanden, 0 fehlgeschlagen**.
+Gesamtbild auf einem funktionierenden System: **9 bestanden, 0 fehlgeschlagen**.
+
+## Mikrofon (internes Mikrofon)
+
+Das interne Mikrofon war der zweite Fehler und lag nicht an der Hardware.
+
+**Symptom:** Eine Aufnahme liefert absolute Stille. Über PipeWire kommt eine
+Datei voller Nullsamples heraus (`-999 dBFS`), direkt an der Hardware bricht
+`arecord` mit `Input/output error` ab. Der Mixer hat keinen `Mic`-Regler.
+
+**Ursache:** In `patch_cirrus_apple.h` steht der gesamte Aufbau der
+Aufnahmesteuerung zwischen
+
+    #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0)
+        ... cs_8409_apple_parse_capture_source ...
+        ... cs_8409_apple_create_input_ctls ...
+    #endif
+
+und die Aufrufstelle ruft im `#else`-Zweig (also ab Kernel 5.13, damit auch
+7.2.5) **nichts** auf. Die Eingänge wurden auf modernen Kernels schlicht nie
+eingerichtet.
+
+Zusätzlich fehlte die Korrektur der ADC-Liste. `check_dyn_adc_switch` in
+`hda_generic.c` soll die `adc_nids`-Liste auf die tatsächlich verbundenen ADCs
+zusammenziehen, tut das aber nicht: es nimmt eine Null-terminierte Liste an,
+während der 8409 einen zufälligen Non-Null-Eintrag in einer ansonsten leeren
+Liste hat. Der Aufnahmestrom landete dadurch auf einem falschen ADC.
+
+**Lösung:** Übernommen aus
+[davidjo/snd_hda_macbookpro](https://github.com/davidjo/snd_hda_macbookpro),
+Datei `patch_cirrus/cirrus_apple.h`:
+
+- neue `cs_8409_apple_create_input_ctls`, die die ADC-Liste korrekt
+  zusammenzieht (die alte bleibt als `_old` für Kernel < 5.13 erhalten)
+- Aufruf im `>= 5.13`-Zweig
+- `spec->gen.suppress_auto_mic = 1` aktiviert
+
+**Beleg, dass es greift:** Die neue Funktion protokolliert mit `printk` (nicht
+mit dem Debug-Makro `myprintk`) und ist deshalb im Kernel-Log sichtbar:
+
+    snd_hda_intel: hda_generic_check_dyn_adc_switch shrinking
+
+Dazu kehrt der `Mic`-Regler in den Mixer zurück, und die Messung liefert Signal:
+
+| Messung                          | RMS       | Spitze    | Ergebnis        |
+|----------------------------------|-----------|-----------|-----------------|
+| vorher (max. Verstärkung)        | -17,0 dBFS | -0,0 dBFS | Signal, klirrt  |
+| nach Justierung, ruhiger Raum    | -37,7 dBFS | -22,9 dBFS | Signal, sauber  |
+
+⚠ Der Wert `-0,0 dBFS` ist Vollaussteuerung. Wer die Verstärkung zum Testen auf
+Maximum dreht (`Internal Mic 100%`, `Internal Mic Boost 2`), nimmt klirrend auf.
+Für Sprachaufnahmen haben sich `Internal Mic 60%` und `Boost 0` bewährt.
+
+**Nicht behoben:** Aufnahme über ein Headset-Mikrofon. Dafür gibt es den offenen
+Pull Request
+[#197](https://github.com/davidjo/snd_hda_macbookpro/pull/197).
 
 ## Die Struktur-Layouts prüfen (`tools/check-abi.py`)
 
@@ -174,10 +230,10 @@ Kernelwechsel automatisch neu übersetzt. Steht noch aus.
 
 ## Beobachtungen, die noch offen sind
 
-- Der Mixer hat mit dem Projektmodul drei Regler (`PCM`, `Internal Mic`,
-  `Internal Mic Boost`), mit dem Kernel-Treiber waren es vier (zusätzlich
-  `Mic`). Das ist kein Fehler, aber noch nicht bewertet — die Aufnahme über
-  das eingebaute Mikrofon sollte bei Gelegenheit gegengehört werden.
+- Der Mixer hat jetzt vier Regler (`PCM`, `Mic`, `Internal Mic`,
+  `Internal Mic Boost`). Vor dem Mikrofon-Fix fehlte `Mic` — das war dasselbe
+  Symptom und ist damit erklärt, kein eigener Fehler.
+- Headset-Mikrofon: nicht behoben, siehe Abschnitt „Mikrofon".
 - Das Modul ist nicht signiert und markiert den Kernel als „tainted"
   (`module verification failed`). Das ist bei Out-of-Tree-Modulen normal,
   Secure Boot wäre damit aber nicht möglich.
