@@ -218,15 +218,30 @@ prüfen. Exit-Code 1, damit es sich in Skripte einhängen lässt.
 
 ## Nach einem Kernel-Update
 
-Derzeit muss nach jedem Kernel-Update mit passenden Headern neu gebaut werden:
+Zwei Wege. **Empfohlen ist DKMS — danach ist nichts mehr zu tun.**
+
+```bash
+sudo pacman -S --needed dkms      # einmalig
+sudo bash setup-dkms.sh
+sudo reboot
+```
+
+`setup-dkms.sh` kopiert die Quellen nach `/usr/src/cs8409-apple-audio-1.0/`,
+registriert sie bei DKMS, baut für den laufenden Kernel und belegt am Ende, dass
+die Modulauflösung wirklich auf `updates/` zeigt. Bei Kernel-Updates übersetzt
+DKMS das Modul selbst neu; Voraussetzung sind die passenden Kernel-Header, die
+`linux-omarchy-headers` mitbringt. Rückgängig: `sudo bash setup-dkms.sh --remove`.
+
+⚠ Das Skript entfernt dabei das von Hand installierte Modul aus `updates/`, damit
+dort nicht zwei identische Module im Suchpfad liegen. Ab dann gehört die Datei
+DKMS — also **nicht** mehr `install-omarchy.sh --rollback` benutzen.
+
+Alternativ ohne DKMS, nach jedem Kernelwechsel von Hand:
 
 ```bash
 sudo bash install-omarchy.sh
 sudo reboot
 ```
-
-Dauerhaft löst das ein DKMS-Paket (`dkms` in `extra`), das sich beim
-Kernelwechsel automatisch neu übersetzt. Steht noch aus.
 
 ## Beobachtungen, die noch offen sind
 
